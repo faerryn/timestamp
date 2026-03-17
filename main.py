@@ -29,6 +29,7 @@ def train(
     model.train()
     for i_epoch in range(n_epochs):
         print(("=" * 10) + f" Epoch {i_epoch:02} " + ("=" * 10))
+        loss_list = []
         for X, _ in (progress := tqdm(trainloader)):
             X = X.to(device)
             t = torch.rand((X.size(0),), device=X.device)
@@ -37,8 +38,11 @@ def train(
             loss = nnf.mse_loss(pred_t, t)
             loss.backward()
             optimizer.step()
-            loss = loss.detach().cpu().item()
-            progress.set_postfix(dict(loss=loss))
+
+            loss_list.append(loss.detach())
+            if len(loss_list) >= 100:
+                progress.set_postfix(dict(loss=torch.mean(torch.as_tensor(loss_list)).cpu().item()))
+                loss_list = []
 
 
 def main():
