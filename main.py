@@ -82,6 +82,7 @@ def main():
                 v2.ToDtype(torch.float32, scale=True),
                 v2.RandomHorizontalFlip(p=0.5),
                 v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                v2.Resize((224, 224)),
             ]
         ),
     )
@@ -102,6 +103,7 @@ def main():
                 v2.ToImage(),
                 v2.ToDtype(torch.float32, scale=True),
                 v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                v2.Resize((224, 224)),
             ]
         ),
     )
@@ -111,7 +113,7 @@ def main():
         num_workers=4,
     )
 
-    model: models.ResNet = models.resnet50(weights="IMAGENET1K_V2")
+    model: nn.Module = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
     in_features = model.fc.in_features
     model.fc = nn.Sequential(nn.Linear(in_features, 1), nn.Hardsigmoid())
     model.to(device)
