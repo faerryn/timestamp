@@ -113,7 +113,7 @@ def main():
         num_workers=4,
     )
 
-    model: nn.Module = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
+    model: nn.Module = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
     in_features = model.fc.in_features
     model.fc = nn.Sequential(nn.Linear(in_features, 1), nn.Hardsigmoid())
     model.to(device)
