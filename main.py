@@ -10,9 +10,9 @@ import torch
 
 def noise(x0: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
     """
-    :param x0: [N, W, H, C]
-    :param t: [N]
-    :return: [N, W, H, C]
+    :param x0: [[N, W, H, C]]
+    :param t: [[N]]
+    :return: [[N, W, H, C]]
     """
     x1 = torch.randn_like(x0)
     t = t.view(-1, 1, 1, 1)
