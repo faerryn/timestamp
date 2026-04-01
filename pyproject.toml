@@ -10,3 +10,6 @@ dependencies = [
     "torchvision>=0.25.0",
     "tqdm>=4.67.3",
 ]
+
+[tool.uv]
+package = true

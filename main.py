@@ -2,19 +2,20 @@ from abc import ABC, abstractmethod
 from torch import nn, optim
 from torch.nn import functional as nnf
 from torch.utils import data
-from torchvision import models, datasets
+from torchvision import models as torchmodels, datasets
 from torchvision.transforms import v2, functional as ttf
 from tqdm import tqdm
 import torch
 
+import models
 
-def noise(x0: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+
+def interpolate(x0: torch.Tensor, x1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
     """
     :param x0: [[N, C, H, W]]
     :param t: [[N]]
     :return: [[N, C, H, W]]
     """
-    x1 = torch.randn_like(x0)
     t = t.view(-1, 1, 1, 1)
     return (1 - t) * x0 + t * x1
 
@@ -32,16 +33,24 @@ def train(
 
     for (X, _) in (progress := tqdm(trainloader)):
         X = X.to(device)
-        t = torch.rand((X.size(0),), device=X.device)
-        noised_X = noise(X, t)
-        pred_t = model(noised_X).squeeze(1)
-        loss = nnf.mse_loss(pred_t, t)
-        acc = nnf.l1_loss(pred_t.detach(), t)
+        t1 = torch.rand((X.size(0),), device=X.device) * 0.95
+        t2 = t1 + 0.05
+        noised_X1 = interpolate(X, torch.randn_like(X), t1)
+        noised_X2 = interpolate(X, torch.randn_like(X), t2)
+
+        E1 = model(noised_X1)
+        E2 = model(noised_X2)
+        Ediff = E1 - E2
+
+        loss = torch.mean(Ediff)
+
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
 
         loss_list.append(loss.detach())
+
+        acc = torch.mean((Ediff.detach() < 0).float())
         acc_list.append(acc)
 
         if len(loss_list) >= 100:
@@ -57,17 +66,31 @@ def test(
     device: torch.device,
 ):
     model.eval()
+
+    loss_list = []
     acc_list = []
+
     with torch.no_grad():
         for X, _ in (progress := tqdm(trainloader)):
             X = X.to(device)
-            t = torch.rand((X.size(0),), device=X.device)
-            noised_X = noise(X, t)
-            pred_t = model(noised_X).squeeze(1)
-            acc = nnf.l1_loss(pred_t.detach(), t)
+            t1 = torch.rand((X.size(0),), device=X.device) * 0.95
+            t2 = t1 + 0.05
+            noised_X1 = interpolate(X, torch.randn_like(X), t1)
+            noised_X2 = interpolate(X, torch.randn_like(X), t2)
+
+            E1 = model(noised_X1)
+            E2 = model(noised_X2)
+            Ediff = E1 - E2
+
+            loss = torch.mean(Ediff)
+
+            loss_list.append(loss)
+            acc = torch.mean((Ediff.detach() < 0).float())
             acc_list.append(acc)
+
+    avg_loss = torch.mean(torch.as_tensor(loss_list)).cpu().item()
     avg_acc = torch.mean(torch.as_tensor(acc_list)).cpu().item()
-    print(f"Eval: avg_acc: {avg_acc}")
+    print(f"Eval: avg_loss: {avg_loss}, avg_acc: {avg_acc}")
 
 
 def train_loop():
@@ -89,7 +112,7 @@ def train_loop():
     )
     trainloader = data.DataLoader(
         trainset,
-        batch_size=128,
+        batch_size=64,
         shuffle=True,
         num_workers=4,
         drop_last=True,
@@ -110,18 +133,16 @@ def train_loop():
     )
     testloader = data.DataLoader(
         testset,
-        batch_size=128,
+        batch_size=64,
         num_workers=4,
     )
 
-    model: nn.Module = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
-    in_features = model.fc.in_features
-    model.fc = nn.Sequential(nn.Linear(in_features, 1), nn.Hardsigmoid())
+    model = models.EnergyModel(weights=torchmodels.ResNet50_Weights.DEFAULT)
     model.to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
-    for i_epoch in range(5):
+    for i_epoch in range(1):
         print(("=" * 10) + f" Epoch {i_epoch:02} " + ("=" * 10))
         train(
             model=model,
@@ -140,9 +161,7 @@ def train_loop():
 def inference():
     device = torch.device("cuda")
 
-    model: nn.Module = models.resnet50(weights=None)
-    in_features = model.fc.in_features
-    model.fc = nn.Sequential(nn.Linear(in_features, 1), nn.Hardsigmoid())
+    model = models.EnergyModel()
     model.to(device)
     model.load_state_dict(torch.load("model.pt2", weights_only=True))
     model.eval()
@@ -166,7 +185,7 @@ def inference():
     mean = torch.as_tensor([0.485, 0.456, 0.406], device=device).view(3, 1, 1)
     std  = torch.as_tensor([0.229, 0.224, 0.225], device=device).view(3, 1, 1)
 
-    canvas = noise(canvas.unsqueeze(0), torch.as_tensor([0.5], device=device))
+    canvas = interpolate(canvas.unsqueeze(0), torch.randn_like(canvas), torch.as_tensor([0.5], device=device))
     canvas = nn.Parameter(canvas, requires_grad=True)
 
     image = ttf.to_pil_image((canvas.squeeze(0) * std) + mean)
