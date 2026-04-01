@@ -3,16 +3,16 @@ from torch import nn, optim
 from torch.nn import functional as nnf
 from torch.utils import data
 from torchvision import models, datasets
-from torchvision.transforms import v2
+from torchvision.transforms import v2, functional as ttf
 from tqdm import tqdm
 import torch
 
 
 def noise(x0: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
     """
-    :param x0: [[N, W, H, C]]
+    :param x0: [[N, C, H, W]]
     :param t: [[N]]
-    :return: [[N, W, H, C]]
+    :return: [[N, C, H, W]]
     """
     x1 = torch.randn_like(x0)
     t = t.view(-1, 1, 1, 1)
@@ -30,7 +30,7 @@ def train(
     loss_list = []
     acc_list = []
 
-    for i, (X, _) in enumerate(progress := tqdm(trainloader)):
+    for (X, _) in (progress := tqdm(trainloader)):
         X = X.to(device)
         t = torch.rand((X.size(0),), device=X.device)
         noised_X = noise(X, t)
@@ -39,6 +39,7 @@ def train(
         acc = nnf.l1_loss(pred_t.detach(), t)
         loss.backward()
         optimizer.step()
+        optimizer.zero_grad()
 
         loss_list.append(loss.detach())
         acc_list.append(acc)
@@ -69,7 +70,7 @@ def test(
     print(f"Eval: avg_acc: {avg_acc}")
 
 
-def main():
+def train_loop():
     device = torch.device("cuda")
 
     trainset = datasets.CelebA(
@@ -118,7 +119,7 @@ def main():
     model.fc = nn.Sequential(nn.Linear(in_features, 1), nn.Hardsigmoid())
     model.to(device)
 
-    optimizer = optim.Adam(model.parameters())
+    optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
     for i_epoch in range(5):
         print(("=" * 10) + f" Epoch {i_epoch:02} " + ("=" * 10))
@@ -134,6 +135,56 @@ def main():
             device=device,
         )
 
+    torch.save(model.state_dict(), "model.pt2")
+
+def inference():
+    device = torch.device("cuda")
+
+    model: nn.Module = models.resnet50(weights=None)
+    in_features = model.fc.in_features
+    model.fc = nn.Sequential(nn.Linear(in_features, 1), nn.Hardsigmoid())
+    model.to(device)
+    model.load_state_dict(torch.load("model.pt2", weights_only=True))
+    model.eval()
+
+    testset = datasets.CelebA(
+        "./data",
+        download=True,
+        split="test",
+        transform=v2.Compose(
+            [
+                v2.ToImage(),
+                v2.ToDtype(torch.float32, scale=True),
+                v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                v2.Resize((224, 224)),
+            ]
+        ),
+    )
+    canvas, _ = next(iter(testset))
+    canvas = canvas.to(device)
+
+    mean = torch.as_tensor([0.485, 0.456, 0.406], device=device).view(3, 1, 1)
+    std  = torch.as_tensor([0.229, 0.224, 0.225], device=device).view(3, 1, 1)
+
+    canvas = noise(canvas.unsqueeze(0), torch.as_tensor([0.5], device=device))
+    canvas = nn.Parameter(canvas, requires_grad=True)
+
+    image = ttf.to_pil_image((canvas.squeeze(0) * std) + mean)
+    image.save("start.png")
+
+    optimizer = optim.Adam([canvas], lr=1e-3)
+    for i_iterations in (progress := tqdm(range(1000))):
+        loss = model(canvas)
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+
+        loss = loss.detach().cpu().item()
+        progress.set_postfix(dict(loss=loss))
+
+    image = ttf.to_pil_image((canvas.squeeze(0) * std) + mean)
+    image.save("end.png")
 
 if __name__ == "__main__":
-    main()
+    train_loop()
+    inference()
