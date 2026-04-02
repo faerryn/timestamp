@@ -1,7 +1,7 @@
 [project]
 name = "timestamp"
 version = "0.1.0"
-description = "Add your description here"
+description = "EBM for image generation"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
